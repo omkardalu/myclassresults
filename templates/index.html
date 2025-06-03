@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SBTET Results Scraper</title>
+    <link rel="stylesheet" href="../static/css/styles.css">
+</head>
+<body>
+    <div class="connection-status" id="connectionStatus">
+        <div class="spinner"></div>Checking connection...
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <h1>SBTET Results Scraper</h1>
+            <p>Automated SBTET exam results extraction and Excel report generation</p>
+        </div>
+
+        <div class="main-content">
+            <!-- Scraping Form -->
+            <div class="card">
+                <h2>Start New Scraping Job</h2>
+                <form id="scrapingForm">
+                    <div class="form-group">
+                        <label for="year">Academic Year</label>
+                        <input type="text" id="year" name="year" value="22" placeholder="e.g., 22" required>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="collegeCode">College Code</label>
+                            <input type="text" id="collegeCode" name="college_code" value="008" placeholder="e.g., 008" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="branchCode">Branch Code</label>
+                            <input type="text" id="branchCode" name="branch_code" value="CM" placeholder="e.g., CM" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="startPin">Start PIN</label>
+                            <input type="number" id="startPin" name="start_pin" value="1" min="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="endPin">End PIN</label>
+                            <input type="number" id="endPin" name="end_pin" value="67" min="1" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="semester">Semester</label>
+                        <select id="semester" name="semester" required>
+                            <option value="1">1st Semester</option>
+                            <option value="2">2nd Semester</option>
+                            <option value="3">3rd Semester</option>
+                            <option value="4">4th Semester</option>
+                            <option value="5" selected>5th Semester</option>
+                            <option value="6">6th Semester</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn" id="startBtn">
+                        <span class="spinner" id="loadingSpinner" style="display: none;"></span>
+                        Start Scraping
+                    </button>
+                </form>
+
+                <div id="alertContainer"></div>
+            </div>
+
+            <!-- Status Card -->
+            <div class="card status-card" id="statusCard">
+                <h2>Job Status</h2>
+                <div id="statusContent">
+                    <div class="alert alert-info">
+                        <strong>Job ID:</strong> <span id="jobId">-</span>
+                    </div>
+
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill" style="width: 0%">
+                            <div class="progress-text" id="progressText">0%</div>
+                        </div>
+                    </div>
+
+                    <div class="status-info">
+                        <div class="info-item">
+                            <span class="number" id="processedCount">0</span>
+                            <div class="label">Processed</div>
+                        </div>
+                        <div class="info-item">
+                            <span class="number" id="totalCount">0</span>
+                            <div class="label">Total</div>
+                        </div>
+                        <div class="info-item">
+                            <span class="number" id="successCount">0</span>
+                            <div class="label">Success</div>
+                        </div>
+                        <div class="info-item">
+                            <span class="number" id="failedCount">0</span>
+                            <div class="label">Failed</div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info" id="statusMessage">
+                        Initializing...
+                    </div>
+
+                    <div id="estimatedTime" style="text-align: center; margin: 15px 0; font-weight: 600;"></div>
+
+                    <div id="downloadSection" style="display: none; text-align: center;">
+                        <a href="#" class="download-btn" id="downloadBtn">
+                            Download Excel Report
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Jobs List -->
+        <div class="card jobs-list" id="jobsList">
+            <h2>Recent Jobs</h2>
+            <div id="jobsContainer">
+                <p style="text-align: center; color: #666;">No active jobs</p>
+            </div>
+        </div>
+    </div>
+<script src="../static/js/scripts.js"></script>
+</body>
+</html>
