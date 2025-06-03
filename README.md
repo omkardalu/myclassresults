@@ -30,7 +30,7 @@ A FastAPI-based web application to efficiently scrape and analyze SBTET (State B
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/myclassresults.git
+git clone https://github.com/omkardalu/myclassresults.git
 cd myclassresults
 ```
 
