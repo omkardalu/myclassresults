@@ -10,6 +10,7 @@ import asyncio
 import uuid
 import time
 import io
+import os
 import logging
 from datetime import datetime, timedelta
 import threading
@@ -32,7 +33,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure this for production
+    allow_origins=["https://mydiplomaclassresults.onrender.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -165,6 +166,7 @@ async def index():
 @app.post("/api/start-scraping", response_model=JobResponse)
 async def start_scraping(request: ScrapeRequest, background_tasks: BackgroundTasks):
     """Start a new scraping job."""
+    MAX_CONCURRENT_JOBS = 3  
     try:
         # Validate input
         if request.start_pin >= request.end_pin:
@@ -197,6 +199,11 @@ async def start_scraping(request: ScrapeRequest, background_tasks: BackgroundTas
         
         # Cleanup old jobs
         background_tasks.add_task(cleanup_old_jobs)
+        active_jobs_count = sum(1 for job in jobs.values() 
+            if job['status'] in [JobStatus.PENDING, JobStatus.IN_PROGRESS])
+
+        if active_jobs_count >= MAX_CONCURRENT_JOBS:
+            raise HTTPException(status_code=429, detail="Too many active jobs")
         
         return JobResponse(
             job_id=job_id,
@@ -357,4 +364,5 @@ async def test_connection():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
