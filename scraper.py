@@ -13,6 +13,11 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from queue import Queue
+import socket
+import ssl
+import urllib3
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,9 +25,10 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 BASE_URL = "https://sbtet.ap.gov.in/APSBTET/results.do"
-MAX_CONCURRENT_REQUESTS = 2  # Conservative for free tier
-REQUEST_TIMEOUT = 15
-MAX_RETRIES = 2
+MAX_CONCURRENT_REQUESTS = 2
+FALLBACK_URL = "http://sbtet.ap.gov.in/APSBTET/results.do"
+REQUEST_TIMEOUT = 30  # Increased timeout
+MAX_RETRIES = 3
 
 class OptimizedSBTETScraper:
     def __init__(self):
@@ -32,15 +38,38 @@ class OptimizedSBTETScraper:
         self._progress = 0
         self._total_pins = 0
         self._lock = threading.Lock()
+        self.working_url = None
         
     def _create_session(self):
-        """Create a lightweight session with minimal overhead."""
+        """Create a robust session with retry strategy."""
         session = requests.Session()
+        
+        # Configure retry strategy
+        retry_strategy = Retry(
+            total=MAX_RETRIES,
+            backoff_factor=2,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "POST"]
+        )
+        
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        # Comprehensive headers
         session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0',
         })
+        
         return session
     
     def get_progress(self):
@@ -53,39 +82,175 @@ class OptimizedSBTETScraper:
         with self._lock:
             self._progress += 1
     
+    def test_connectivity(self):
+        """Test connectivity to SBTET website with multiple approaches."""
+        urls_to_test = [BASE_URL, FALLBACK_URL]
+        
+        for url in urls_to_test:
+            try:
+                logger.info(f"Testing connectivity to: {url}")
+                
+                # Test with different timeouts
+                for timeout in [10, 20, 30]:
+                    try:
+                        response = self.session.get(url, timeout=timeout)
+                        if response.status_code == 200:
+                            logger.info(f"✓ Connected to {url} (timeout: {timeout}s)")
+                            self.working_url = url
+                            return True, url
+                    except requests.exceptions.Timeout:
+                        logger.warning(f"Timeout ({timeout}s) for {url}")
+                        continue
+                    except Exception as e:
+                        logger.warning(f"Error with {url}: {e}")
+                        break
+                        
+            except Exception as e:
+                logger.error(f"Failed to connect to {url}: {e}")
+                continue
+                
+        return False, None
+
+    def diagnose_connection_issue(self):
+        """Diagnose connection issues with detailed information."""
+        diagnosis = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "tests": {}
+        }
+        
+        # Test DNS resolution
+        try:
+            hostname = "sbtet.ap.gov.in"
+            ip = socket.gethostbyname(hostname)
+            diagnosis["tests"]["dns_resolution"] = {"status": "success", "ip": ip}
+        except Exception as e:
+            diagnosis["tests"]["dns_resolution"] = {"status": "failed", "error": str(e)}
+        
+        # Test port connectivity
+        for port, protocol in [(80, "HTTP"), (443, "HTTPS")]:
+            try:
+                sock = socket.create_connection(("sbtet.ap.gov.in", port), timeout=10)
+                sock.close()
+                diagnosis["tests"][f"{protocol.lower()}_port"] = {"status": "success", "port": port}
+            except Exception as e:
+                diagnosis["tests"][f"{protocol.lower()}_port"] = {"status": "failed", "port": port, "error": str(e)}
+        
+        # Test HTTP requests
+        for url in [BASE_URL, FALLBACK_URL]:
+            try:
+                response = self.session.get(url, timeout=15)
+                diagnosis["tests"][f"http_request_{url.split('://')[0]}"] = {
+                    "status": "success", 
+                    "url": url, 
+                    "status_code": response.status_code,
+                    "response_size": len(response.content)
+                }
+            except Exception as e:
+                diagnosis["tests"][f"http_request_{url.split('://')[0]}"] = {
+                    "status": "failed", 
+                    "url": url, 
+                    "error": str(e)
+                }
+        
+        return diagnosis
+
+
     def analyze_form_structure(self):
-        """Lightweight form analysis with caching."""
+        """Enhanced form analysis with fallback URLs and better error handling."""
         if self.form_data:
             return self.form_data
-            
+        
+        # Test connectivity first
+        if not self.working_url:
+            is_connected, working_url = self.test_connectivity()
+            if not is_connected:
+                raise Exception("Cannot connect to SBTET website. Check network connectivity.")
+            self.working_url = working_url
+        
         try:
-            logger.info("Analyzing form structure...")
-            response = self.session.get(BASE_URL, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
+            logger.info(f"Analyzing form structure from: {self.working_url}")
             
-            soup = BeautifulSoup(response.content, 'html.parser')
-            form = soup.find('form')
+            # Try multiple approaches
+            approaches = [
+                {"timeout": 30, "verify": True},
+                {"timeout": 45, "verify": True},
+                {"timeout": 30, "verify": False},  # Disable SSL verification as last resort
+            ]
             
-            if not form:
-                raise Exception("No form found")
+            for approach in approaches:
+                try:
+                    response = self.session.get(
+                        self.working_url, 
+                        timeout=approach["timeout"],
+                        verify=approach["verify"]
+                    )
+                    response.raise_for_status()
+                    
+                    # Check if we got actual HTML content
+                    if len(response.content) < 100:
+                        raise Exception("Response too short - likely not the form page")
+                    
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    form = soup.find('form')
+                    
+                    if not form:
+                        # Try to find any form-like structures
+                        forms = soup.find_all(['form', 'div'], {'class': re.compile(r'form', re.I)})
+                        if forms:
+                            form = forms[0]
+                        else:
+                            raise Exception("No form found on the page")
+                    
+                    # Extract form data
+                    self.form_data = {
+                        'action': form.get('action', ''),
+                        'method': form.get('method', 'POST'),
+                        'hidden_fields': {},
+                        'base_url': self.working_url
+                    }
+                    
+                    # Store hidden fields
+                    for inp in form.find_all('input', type='hidden'):
+                        if inp.get('name'):
+                            self.form_data['hidden_fields'][inp.get('name')] = inp.get('value', '')
+                    
+                    # Store other form inputs
+                    for inp in form.find_all('input'):
+                        input_type = inp.get('type', '').lower()
+                        if input_type in ['text', 'number', 'email']:
+                            name = inp.get('name', '')
+                            if name and name not in self.form_data['hidden_fields']:
+                                self.form_data['hidden_fields'][name] = inp.get('value', '')
+                    
+                    logger.info(f"✓ Form analysis successful! Found {len(self.form_data['hidden_fields'])} fields")
+                    return self.form_data
+                    
+                except requests.exceptions.SSLError as e:
+                    logger.warning(f"SSL Error: {e}")
+                    if approach["verify"]:
+                        continue  # Try next approach
+                    else:
+                        raise
+                except requests.exceptions.Timeout as e:
+                    logger.warning(f"Timeout ({approach['timeout']}s): {e}")
+                    continue
+                except Exception as e:
+                    logger.warning(f"Approach failed: {e}")
+                    continue
             
-            # Extract only essential form data
-            self.form_data = {
-                'action': form.get('action', ''),
-                'hidden_fields': {}
-            }
-            
-            # Store hidden fields only
-            for inp in form.find_all('input', type='hidden'):
-                if inp.get('name'):
-                    self.form_data['hidden_fields'][inp.get('name')] = inp.get('value', '')
-            
-            logger.info("Form analysis complete")
-            return self.form_data
+            raise Exception("All form analysis approaches failed")
             
         except Exception as e:
             logger.error(f"Form analysis failed: {e}")
-            return None
+            # Provide detailed error information
+            if "timeout" in str(e).lower():
+                raise Exception(f"Connection timeout to SBTET website. The server may be slow or your network connection is limited. Error: {e}")
+            elif "ssl" in str(e).lower():
+                raise Exception(f"SSL/Certificate error. Try accessing the website directly to check if it's working. Error: {e}")
+            elif "network" in str(e).lower() or "unreachable" in str(e).lower():
+                raise Exception(f"Network connectivity issue. Your deployment environment cannot reach the SBTET website. Error: {e}")
+            else:
+                raise Exception(f"Form analysis failed: {e}")
     
     def generate_pins(self, year, branch_code, college_code, start=1, end=67):
         """Generate PIN list efficiently."""

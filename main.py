@@ -340,26 +340,49 @@ async def cancel_job(job_id: str):
 # Add a simple endpoint for testing parameters
 @app.get("/api/test-connection")
 async def test_connection():
-    """Test connection to SBTET website."""
+    """Enhanced test connection with detailed diagnostics."""
     try:
         scraper = OptimizedSBTETScraper()
+        
+        # First run diagnostics
+        diagnosis = scraper.diagnose_connection_issue()
+        
+        # Try to analyze form
         form_data = scraper.analyze_form_structure()
         
         if form_data:
             return {
                 "status": "success",
-                "message": "Successfully connected to SBTET website",
-                "form_fields": len(form_data.get('hidden_fields', {}))
+                "message": f"Successfully connected to SBTET website via {scraper.working_url}",
+                "form_fields": len(form_data.get('hidden_fields', {})),
+                "diagnostics": diagnosis,
+                "working_url": scraper.working_url
             }
         else:
             return {
                 "status": "error",
-                "message": "Failed to analyze SBTET website form"
+                "message": "Failed to analyze SBTET website form",
+                "diagnostics": diagnosis,
+                "suggestions": [
+                    "Check if SBTET website is accessible from your location",
+                    "Verify network connectivity in production environment",
+                    "Check firewall settings for outbound connections"
+                ]
             }
     except Exception as e:
+        scraper = OptimizedSBTETScraper()
+        diagnosis = scraper.diagnose_connection_issue()
+        
         return {
             "status": "error",
-            "message": f"Connection test failed: {str(e)}"
+            "message": f"Connection test failed: {str(e)}",
+            "diagnostics": diagnosis,
+            "suggestions": [
+                "Check network connectivity in production environment",
+                "Verify firewall allows outbound HTTPS connections",
+                "Check if proxy configuration is needed",
+                "Try again later - target server might be temporarily down"
+            ]
         }
 
 if __name__ == "__main__":
